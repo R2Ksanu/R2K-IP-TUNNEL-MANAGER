@@ -2,27 +2,29 @@
 ==========================
 
 Effortless HTTP/HTTPS & TCP Tunnel Manager using Ngrok — perfect for Minecraft servers, web panels, and more!
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 📦 FEATURES
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
+ 
 ✔️ Auto HTTP/HTTPS & TCP Tunnel Forwarder  
 ✔️ Auto-Restart on Boot (via systemd)  
 ✔️ Easy Commands: add | remove | list | refresh  
 ✔️ Made for Minecraft, Web Panels & More  
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━
 ⚙️ INSTALLATION GUIDE
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
+
 1️⃣ First, install CURL (if not already):
 
     sudo apt update && sudo apt install -y curl
 
 2️⃣ Clone this repository:
 
-    git clone https://github.com/R2Ksanu/R2K-IP-TUNNEL-MANAGER-.git
+    git clone https://github.com/R2Ksanu/R2K-IP-TUNNEL-MANAGER.git
 
 3️⃣ Enter the directory:
 
-    cd R2K-IP-TUNNEL-MANAGER-
+    cd R2K-IP-TUNNEL-MANAGER
 
 4️⃣ Run the setup script:
 
@@ -41,9 +43,10 @@ Effortless HTTP/HTTPS & TCP Tunnel Manager using Ngrok — perfect for Minecraft
     ngrok config add-authtoken [YOUR_AUTHTOKEN]
 
 7️⃣ During setup, you will be asked to enter this token.
-━━━━━━━━━━━━━━━━━━━━━━━
+
+━━━━━━━━━━━━━━━━━━━
 💻 AVAILABLE COMMANDS (AFTER SETUP)
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 
 ➤ Add a new tunnel (TCP or HTTP):
 
