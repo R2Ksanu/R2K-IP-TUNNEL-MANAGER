@@ -1,21 +1,6 @@
 #!/bin/bash
 
-#  ▄▀█ ▀█▀ █▀▀ █▀█   █ █▄░█   █▀█ █ █▀█   █ █▀▄ █▀▀
-#  █▀█ ░█░ █▄▄ █▄█   █ █░▀█   █▀▄ █ █▄█   █ █▄▀ ██▄
-# ┌─────────────────────────────────────────────┐
-# │           🚀 R2K-IP TUNNEL MANAGER          │
-# ├─────────────────────────────────────────────┤
-# │  🛠  Auto HTTP/HTTPS & TCP Tunnel Forwarder │
-# │  🔄 Auto-Restart at Boot (systemd service)  │
-# │  💡 Made for Minecraft, Web Panels & More   │
-# └─────────────────────────────────────────────┘
-#
-# 💻 Usage:
-#   r2kip add 25565 tcp     → Minecraft port
-#   r2kip add 3000 http     → Web panel port
-#   r2kip list              → View tunnels
-#   r2kip remove 3000       → Stop tunnel
-#   r2kip refresh           → Restart saved tunnels
+# r2k-ip.sh - Installer for r2kip with HTTP support + auto-start via systemd
 
 PORTS_FILE="/etc/ngrok.ports"
 NGROK_BIN="/usr/bin/ngrok"
@@ -36,20 +21,8 @@ fi
 # Install jq for parsing Ngrok API responses
 sudo apt install -y jq
 
-# Prompt for Ngrok authtoken using retype
-echo -n "🔑 Enter your Ngrok authtoken: "
-read -s token1
-echo
-echo -n "🔁 Retype your Ngrok authtoken: "
-read -s token2
-echo
-
-if [[ "$token1" != "$token2" ]]; then
-    echo "❌ Tokens do not match. Exiting."
-    exit 1
-fi
-
-ngrok config add-authtoken "$token1"
+read -p "🔑 Enter your Ngrok authtoken: " NGROK_TOKEN
+ngrok config add-authtoken "$NGROK_TOKEN"
 
 echo "📦 Creating r2kip tunnel manager..."
 
@@ -75,6 +48,7 @@ add_port() {
     local log_file="${LOG_DIR}/ngrok_${type}_${port}.log"
     nohup ngrok $type $port > "$log_file" 2>&1 &
 
+    # Wait up to 5s for ngrok API to respond
     for i in {1..10}; do
         sleep 0.5
         url=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.config.addr | test("'$port'$")) | .public_url')
@@ -106,30 +80,22 @@ remove_port() {
 }
 
 list_ports() {
-    if [[ ! -f "$PORTS_FILE" || ! -s "$PORTS_FILE" ]]; then
-        echo -e "🚫 [R2K-IP] No active tunnels found."
-        echo "💡 Use: r2kip add <port> [tcp|http] to create one."
+    if [[ ! -f "$PORTS_FILE" ]]; then
+        echo "⚠️ No active tunnels."
         exit 0
     fi
-
-    echo -e "\n📡 [R2K-IP] Active Tunnels"
-    echo "┌────────────┬────────┬────────────────────────────────────────┐"
-    echo "│  Protocol  │  Port  │               Public URL               │"
-    echo "├────────────┼────────┼────────────────────────────────────────┤"
-
+    echo "📋 Active Ngrok Tunnels:"
     while IFS= read -r line; do
         local_port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
         url=$(echo "$line" | cut -d':' -f3-)
-        printf "│  %-8s │  %-6s │  %-38s │\n" "$type" "$local_port" "$url"
+        echo "🔹 $type port $local_port → $url"
     done < "$PORTS_FILE"
-
-    echo "└────────────┴────────┴────────────────────────────────────────┘"
 }
 
 refresh_ports() {
-    echo "🔄 Restarting saved tunnels..."
-    if [[ ! -f "$PORTS_FILE" || ! -s "$PORTS_FILE" ]]; then
+    echo "🔄 Restarting tunnels..."
+    if [[ ! -f "$PORTS_FILE" ]]; then
         echo "⚠️ No tunnels saved."
         exit 0
     fi
@@ -187,7 +153,7 @@ sudo systemctl enable r2kip-refresh
 echo ""
 echo "✅ Setup complete! Commands:"
 echo "  r2kip add 3000 http     → expose HTTP panel"
-echo "  r2kip add 25565 tcp     → expose TCP Minecraft port"
+echo "  r2kip add 25565         → expose TCP Minecraft port"
 echo "  r2kip list              → show active tunnels"
 echo "  r2kip remove 25565      → stop tunnel"
 echo "  r2kip refresh           → restart saved tunnels"
