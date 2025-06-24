@@ -24,7 +24,7 @@ Effortless HTTP/HTTPS & TCP Tunnel Manager using Ngrok — perfect for Minecraft
 
 3️⃣ Enter the directory:
 
-    cd R2K-IP-TUNNEL-MANAGER-
+    cd R2K-IP-TUNNEL-MANAGER
 
 4️⃣ Run the setup script:
 
