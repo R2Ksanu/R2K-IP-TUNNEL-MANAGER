@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# r2k-ip.sh - Installer for r2kip with HTTP support + auto-start via systemd
+# r2k-ip.sh - Installer for R2K-IP Tunnel Manager
 
 PORTS_FILE="/etc/ngrok.ports"
 NGROK_BIN="/usr/bin/ngrok"
@@ -12,53 +12,68 @@ RED='\033[0;31m'
 ORANGE='\033[38;5;208m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-YELLOW='\033[0;33m'
-NC='\033[0m' # No Color
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# ASCII Art
+# ASCII Art Banner
 ascii_art="
-${RED} ▄▀█ ▀█▀ █▀▀ █▀█   █ █▄░█   █▀█ █ █▀█   █ █▀▄ █▀▀${NC}
-${ORANGE} █▀█ ░█░ █▄▄ █▄█   █ █░▀█   █▀▄ █ █▄█   █ █▄▀ ██▄${NC}
-${BLUE}┌─────────────────────────────────────────────┐
-│           🚀 R2K-IP TUNNEL MANAGER          │
-├─────────────────────────────────────────────┤
-│  🛠  Auto HTTP/HTTPS & TCP Tunnel Forwarder │
-│  🔄 Auto-Restart at Boot (systemd service)  │
-│  💡 Made for Minecraft, Web Panels & More   │
-└─────────────────────────────────────────────┘
-${NC}
-💻 ${CYAN}Usage:
-  r2kip add 25565 tcp     → Minecraft port
-  r2kip add 3000 http     → Web panel port
-  r2kip list              → View tunnels
-  r2kip remove 3000       → Stop tunnel
-  r2kip refresh           → Restart saved tunnels${NC}
+${RED} ▄▀█▀█▀▀▀█▀█   █ █▄░█   █▀█ █ █▀█   █ █▀▄ █▀▀${NC}
+${ORANGE} █▀█░█░░█▄█   █ █░▀█   █▀▄ █ █▄█   █ █▄▀ ██▄${NC}
+${BLUE}┌─────────────────────────────────────────────┐${NC}
+${BLUE}│${CYAN}           🚀 R2K-IP TUNNEL MANAGER          ${BLUE}│${NC}
+${BLUE}├─────────────────────────────────────────────┤${NC}
+${BLUE}│${YELLOW}  🛠  Auto HTTP/HTTPS & TCP Tunnel Forwarder ${BLUE}│${NC}
+${BLUE}│${YELLOW}  🔄 Auto-Restart at Boot (systemd service)  ${BLUE}│${NC}
+${BLUE}│${YELLOW}  💡 Made for Minecraft, Web Panels & More   ${BLUE}│${NC}
+${BLUE}└─────────────────────────────────────────────┘${NC}
+
+💻 ${CYAN}Usage:${NC}
+  ${GREEN}r2kip add 25565 tcp${NC}     → Minecraft port
+  ${GREEN}r2kip add 3000 http${NC}     → Web panel port
+  ${GREEN}r2kip list${NC}              → View tunnels
+  ${GREEN}r2kip remove 3000${NC}       → Stop tunnel
+  ${GREEN}r2kip refresh${NC}           → Restart saved tunnels
 "
 
+# Root check
 clear
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}❌ Please run this script as root.${NC}"
-  exit 1
+if [[ "$EUID" -ne 0 ]]; then
+    echo -e "${RED}❌ Please run this script as root.${NC}"
+    exit 1
 fi
 
 echo -e "$ascii_art"
 
-echo "🚀 Installing Ngrok..."
+# Animated loading bar
+function loading_bar() {
+    local msg="$1"
+    echo -n "🚀 $msg"
+    for i in {1..3}; do
+        sleep 0.4
+        echo -n "."
+    done
+    echo ""
+}
 
+# Install ngrok silently
+loading_bar "Installing Ngrok"
 if [[ ! -f "$NGROK_BIN" ]]; then
-    curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-    echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-    sudo apt update
-    sudo apt install -y ngrok
+    curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc > /dev/null
+    echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list > /dev/null
+    sudo apt update -qq > /dev/null
+    sudo apt install -y ngrok > /dev/null 2>&1
 else
     echo "✅ Ngrok already installed."
 fi
 
-sudo apt install -y jq
+# Install jq silently
+sudo apt install -y jq > /dev/null 2>&1
 
+# Ngrok auth token input
 read -p "🔑 Enter your Ngrok authtoken: " NGROK_TOKEN
 ngrok config add-authtoken "$NGROK_TOKEN"
 
+# Write r2kip manager
 echo "📦 Creating r2kip tunnel manager..."
 
 sudo tee "$R2K_CMD" > /dev/null << 'EOF'
@@ -68,18 +83,11 @@ PORTS_FILE="/etc/ngrok.ports"
 LOG_DIR="/tmp/ngrok_logs"
 mkdir -p "$LOG_DIR"
 
-RED='\033[0;31m'
-ORANGE='\033[38;5;208m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
 add_port() {
     local port=$1
     local type=$2
     if [[ -z "$port" ]]; then
-        echo -e "${RED}❌ Please provide a port.${NC}"
+        echo "❌ Please provide a port."
         exit 1
     fi
 
@@ -93,59 +101,59 @@ add_port() {
     for i in {1..10}; do
         sleep 0.5
         url=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.config.addr | test("'$port'$")) | .public_url')
-        if [[ -n "$url" && "$url" != "null" ]]; then
-            break
-        fi
+        if [[ -n "$url" && "$url" != "null" ]]; then break; fi
     done
 
     if [[ -z "$url" || "$url" == "null" ]]; then
-        echo -e "${RED}❌ Failed to start ngrok tunnel for port $port${NC}"
+        echo "❌ Failed to start ngrok tunnel for port $port"
         exit 1
     fi
 
     echo "${port}:${type}:${url}" >> "$PORTS_FILE"
-    echo -e "${GREEN}✅ Local ${type} port ${port} exposed at: ${url}${NC}"
+    echo "✅ Local ${type} port ${port} exposed at: ${url}"
+    printf "\n"
+    printf "┌──────────────┬────────────┬────────────────────────────────────────┐\n"
+    printf "│  Protocol    │  Port      │              Public URL                │\n"
+    printf "├──────────────┼────────────┼────────────────────────────────────────┤\n"
+    printf "│  %-10s │  %-8s │  %-38s │\n" "$type" "$port" "$url"
+    printf "└──────────────┴────────────┴────────────────────────────────────────┘\n"
 }
 
 remove_port() {
     local port=$1
     if [[ -z "$port" ]]; then
-        echo -e "${RED}❌ Provide a port to remove.${NC}"
+        echo "❌ Provide a port to remove."
         exit 1
     fi
 
     pkill -f "ngrok .* $port" >/dev/null 2>&1
     sed -i "/^${port}:/d" "$PORTS_FILE"
     rm -f "${LOG_DIR}/ngrok_"*"_${port}.log"
-    echo -e "${GREEN}✅ Removed tunnel for port ${port}${NC}"
+    echo "✅ Removed tunnel for port ${port}"
 }
 
 list_ports() {
     if [[ ! -f "$PORTS_FILE" ]]; then
-        echo -e "${YELLOW}⚠️  No active tunnels.${NC}"
+        echo "⚠️ No active tunnels."
         exit 0
     fi
-
-    echo -e "${BLUE}"
-    printf "   ┌──────────────┬────────────┬────────────────────────────────────────┐\n"
-    printf "   │   Protocol   │   Port     │              Public URL                │\n"
-    printf "   ├──────────────┼────────────┼────────────────────────────────────────┤\n"
-    
+    echo "📋 Active Ngrok Tunnels:"
+    printf "\n┌──────────────┬────────────┬────────────────────────────────────────┐\n"
+    printf "│  Protocol    │  Port      │              Public URL                │\n"
+    printf "├──────────────┼────────────┼────────────────────────────────────────┤\n"
     while IFS= read -r line; do
         local_port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
         url=$(echo "$line" | cut -d':' -f3-)
-        printf "   │  %-10s │  %-8s │  %-38s │\n" "$type" "$local_port" "$url"
+        printf "│  %-10s │  %-8s │  %-38s │\n" "$type" "$local_port" "$url"
     done < "$PORTS_FILE"
-
-    printf "   └──────────────┴────────────┴────────────────────────────────────────┘\n"
-    echo -e "${NC}"
+    printf "└──────────────┴────────────┴────────────────────────────────────────┘\n"
 }
 
 refresh_ports() {
-    echo -e "${CYAN}🔄 Restarting tunnels...${NC}"
+    echo "🔄 Restarting tunnels..."
     if [[ ! -f "$PORTS_FILE" ]]; then
-        echo -e "${YELLOW}⚠️  No tunnels saved.${NC}"
+        echo "⚠️ No tunnels saved."
         exit 0
     fi
     local ports=$(cat "$PORTS_FILE")
@@ -159,27 +167,17 @@ refresh_ports() {
 }
 
 case "$1" in
-    add)
-        add_port "$2" "$3"
-        ;;
-    remove)
-        remove_port "$2"
-        ;;
-    list)
-        list_ports
-        ;;
-    refresh)
-        refresh_ports
-        ;;
-    *)
-        echo -e "${YELLOW}Usage: r2kip {add|remove|list|refresh} [port] [type:tcp|http]${NC}"
-        exit 1
-        ;;
+    add) add_port "$2" "$3" ;;
+    remove) remove_port "$2" ;;
+    list) list_ports ;;
+    refresh) refresh_ports ;;
+    *) echo "Usage: r2kip {add|remove|list|refresh} [port] [type:tcp|http]"; exit 1 ;;
 esac
 EOF
 
-sudo chmod +x "$R2K_CMD"
+chmod +x "$R2K_CMD"
 
+# Systemd setup
 echo "🛠 Setting up systemd auto-start..."
 
 sudo tee /etc/systemd/system/r2kip-refresh.service > /dev/null <<EOF
@@ -199,10 +197,4 @@ sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
 sudo systemctl enable r2kip-refresh
 
-echo ""
-echo -e "${GREEN}✅ Setup complete! Commands:${NC}"
-echo "  r2kip add 3000 http     → expose HTTP panel"
-echo "  r2kip add 25565 tcp     → expose TCP Minecraft port"
-echo "  r2kip list              → show active tunnels"
-echo "  r2kip remove 25565      → stop tunnel"
-echo "  r2kip refresh           → restart saved tunnels"
+echo -e "\n🎉 ${GREEN}Setup complete! You can now use r2kip command.${NC}"
