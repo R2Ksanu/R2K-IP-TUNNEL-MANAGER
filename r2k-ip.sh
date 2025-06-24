@@ -2,6 +2,46 @@
 
 # r2k-ip.sh - Installer for r2kip with HTTP support + auto-start via systemd
 
+# ─────────────────────────────────────────────────────────────
+
+# Colors
+RED='\033[0;31m'
+ORANGE='\033[0;33m' # Approximated using yellow
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# ASCII Art Header
+ascii_art="
+${RED}  ▄▀█ ▀█▀ █▀▀ █▀█   █ █▄░█   █▀█ █ █▀█   █ █▀▄ █▀▀${NC}
+${ORANGE}  █▀█ ░█░ █▄▄ █▄█   █ █░▀█   █▀▄ █ █▄█   █ █▄▀ ██▄${NC}
+${BLUE} ┌─────────────────────────────────────────────┐
+ │           🚀 R2K-IP TUNNEL MANAGER          │
+ ├─────────────────────────────────────────────┤
+ │  🛠  Auto HTTP/HTTPS & TCP Tunnel Forwarder │
+ │  🔄 Auto-Restart at Boot (systemd service)  │
+ │  💡 Made for Minecraft, Web Panels & More   │
+ └─────────────────────────────────────────────┘${NC}
+
+💻 ${RED}Usage:${NC}
+  ${ORANGE}r2kip add 25565 tcp${NC}     → Minecraft port
+  ${ORANGE}r2kip add 3000 http${NC}     → Web panel port
+  ${BLUE}r2kip list${NC}              → View tunnels
+  ${RED}r2kip remove 3000${NC}       → Stop tunnel
+  ${BLUE}r2kip refresh${NC}           → Restart saved tunnels
+"
+
+# Clear the screen
+clear
+
+# Check for root
+if [ "$EUID" -ne 0 ]; then
+  echo -e "${RED}Please run this script as root.${NC}"
+  exit 1
+fi
+
+# Display ASCII Art
+echo -e "$ascii_art"
+
 PORTS_FILE="/etc/ngrok.ports"
 NGROK_BIN="/usr/bin/ngrok"
 R2K_CMD="/usr/local/bin/r2kip"
