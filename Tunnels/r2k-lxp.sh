@@ -20,6 +20,17 @@ print_header() {
     echo -e "${RESET}"
 }
 
+# Function to validate LocalXpose API token
+validate_token() {
+    local token=$1
+    echo -e "${WHITE}🔍 Validating LocalXpose API token...${RESET}"
+    if ! "$LXP_BIN" account status --token "$token" > /dev/null 2>&1; then
+        echo -e "${WHITE}❌ Invalid or expired API token. Please check your token at https://localxpose.io/dashboard/access${RESET}"
+        exit 1
+    fi
+    echo -e "${BLUE}✅ API token validated successfully${RESET}"
+}
+
 print_header
 echo -e "${WHITE}🔧 Installing LocalXpose CLI...${RESET}"
 
@@ -33,6 +44,7 @@ fi
 
 echo -ne "${WHITE}🔑 Enter your LocalXpose auth token: ${RESET}"
 read -r LXP_TOKEN
+validate_token "$LXP_TOKEN"
 "$LXP_BIN" authtoken "$LXP_TOKEN"
 
 echo -e "\n${WHITE}📦 Creating r2k-ip tunnel manager...${RESET}"
@@ -63,6 +75,7 @@ print_header() {
 add_port() {
     local port=$1
     local type=$2
+    local region=$3
 
     print_header
 
@@ -71,24 +84,31 @@ add_port() {
         exit 1
     fi
 
-    if [[ "$type" != "http" && "$type" != "tcp" ]]; then
+    if [[ "$type" != "http" && "$type" != "tcp" && "$type" != "udp" ]]; then
         type="tcp"
     fi
 
-    echo -e "${WHITE}🔌 Creating ${type^^} tunnel on port ${port}...${RESET}"
-    local log_file="${LOG_DIR}/r2k_${type}_${port}.log"
-    nohup "$LXP_BIN" tunnel "$type" --port "$port" > "$log_file" 2>&1 &
-
-    sleep 3
-    url=$(grep -Eo 'https?://[^ ]+|tcp://[^ ]+' "$log_file" | head -n 1)
-
-    if [[ -z "$url" ]]; then
-        echo -e "${WHITE}❌ Failed to start tunnel for port $port${RESET}"
+    if [[ -z "$region" ]]; then
+        region="us"
+    elif [[ "$region" != "us" && "$region" != "eu" && "$region" != "ap" ]]; then
+        echo -e "${WHITE}❌ Invalid region. Supported regions: us, eu, ap${RESET}"
         exit 1
     fi
 
-    echo "${port}:${type}:${url}" >> "$PORTS_FILE"
-    echo -e "${BLUE}✅ ${type^^} tunnel exposed: $url${RESET}"
+    echo -e "${WHITE}🔌 Creating ${type^^} tunnel on port ${port} in region ${region}...${RESET}"
+    local log_file="${LOG_DIR}/r2k_${type}_${port}.log"
+    nohup "$LXP_BIN" tunnel "$type" --port "$port" --region "$region" > "$log_file" 2>&1 &
+
+    sleep 3
+    url=$(grep -Eo 'https?://[^ ]+|tcp://[^ ]+|udp://[^ ]+' "$log_file" | head -n 1)
+
+    if [[ -z "$url" ]]; then
+        echo -e "${WHITE}❌ Failed to start tunnel for port $port in region $region${RESET}"
+        exit 1
+    fi
+
+    echo "${port}:${type}:${region}:${url}" >> "$PORTS_FILE"
+    echo -e "${BLUE}✅ ${type^^} tunnel exposed: $url (Region: $region)${RESET}"
 }
 
 remove_port() {
@@ -117,14 +137,15 @@ list_ports() {
 
     echo -e "${WHITE}${BOLD}📦 Active Tunnels${RESET}"
     echo -e "${GRAY}───────────────────────────────────────────────────────────────${RESET}"
-    printf "${BLUE}🔹 %-6s │ %-5s │ %-40s${RESET}\n" "Port" "Type" "Public URL"
+    printf "${BLUE}🔹 %-6s │ %-5s │ %-6s │ %-40s${RESET}\n" "Port" "Type" "Region" "Public URL"
     echo -e "${GRAY}───────────────────────────────────────────────────────────────${RESET}"
 
     while IFS= read -r line; do
         port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
-        url=$(echo "$line" | cut -d':' -f3-)
-        printf "🔹 %-6s │ %-5s │ %-40s\n" "$port" "$type" "$url"
+        region=$(echo "$line" | cut -d':' -f3)
+        url=$(echo "$line" | cut -d':' -f4-)
+        printf "🔹 %-6s │ %-5s │ %-6s │ %-40s\n" "$port" "$type" "$region" "$url"
     done < "$PORTS_FILE"
 
     echo -e "${GRAY}───────────────────────────────────────────────────────────────${RESET}"
@@ -146,7 +167,8 @@ refresh_ports() {
     while IFS= read -r line; do
         port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
-        add_port "$port" "$type"
+        region=$(echo "$line" | cut -d':' -f3)
+        add_port "$port" "$type" "$region"
     done <<< "$ports"
 
     echo -e "${BLUE}✅ All tunnels restarted.${RESET}"
@@ -154,18 +176,19 @@ refresh_ports() {
 
 show_help() {
     print_header
-    echo -e "${WHITE}${BOLD}Usage:${RESET} r2k-ip {add|remove|list|refresh} [port] [type]"
+    echo -e "${WHITE}${BOLD}Usage:${RESET} r2k-ip {add|remove|list|refresh} [port] [type] [region]"
     echo ""
     echo -e "${BLUE}Commands:${RESET}"
-    echo -e "  🔹 ${BOLD}add <port> [tcp|http]${RESET}     ${WHITE}Expose new tunnel${RESET}"
-    echo -e "  🔹 ${BOLD}remove <port>${RESET}             ${WHITE}Stop tunnel on given port${RESET}"
-    echo -e "  🔹 ${BOLD}list${RESET}                      ${WHITE}Show all active tunnels${RESET}"
-    echo -e "  🔹 ${BOLD}refresh${RESET}                   ${WHITE}Restart all saved tunnels${RESET}"
+    echo -e "  🔹 ${BOLD}add <port> [tcp|http|udp] [us|eu|ap]${RESET}     ${WHITE}Expose new tunnel${RESET}"
+    echo -e "  🔹 ${BOLD}remove <port>${RESET}                           ${WHITE}Stop tunnel on given port${RESET}"
+    echo -e "  🔹 ${BOLD}list${RESET}                                  ${WHITE}Show all active tunnels${RESET}"
+    echo -e "  🔹 ${BOLD}refresh${RESET}                               ${WHITE}Restart all saved tunnels${RESET}"
+    echo -e "${BLUE}Supported Regions:${RESET} us (default), eu, ap"
     echo ""
 }
 
 case "$1" in
-    add) add_port "$2" "$3" ;;
+    add) add_port "$2" "$3" "$4" ;;
     remove) remove_port "$2" ;;
     list) list_ports ;;
     refresh) refresh_ports ;;
@@ -195,14 +218,12 @@ sudo systemctl enable r2k-ip-refresh
 
 echo -e "\n${BLUE}${BOLD}🎉 Setup Complete! Commands:${RESET}"
 echo -e "${WHITE}──────────────────────────────────────────────${RESET}"
-echo -e "🔹 ${BOLD}r2k-ip add 3000 http${RESET}     → Expose HTTP port"
-echo -e "🔹 ${BOLD}r2k-ip add 25565 tcp${RESET}     → Expose Minecraft port"
-echo -e "🔹 ${BOLD}r2k-ip list${RESET}              → Show active tunnels"
-echo -e "🔹 ${BOLD}r2k-ip remove 25565${RESET}      → Remove a tunnel"
-echo -e "🔹 ${BOLD}r2k-ip refresh${RESET}           → Restart all saved"
+echo -e "🔹 ${BOLD}r2k-ip add 3000 http us${RESET}     → Expose HTTP port in US region"
+echo -e "🔹 ${BOLD}r2k-ip add 25565 tcp eu${RESET}     → Expose Minecraft port in EU region"
+echo -e "🔹 ${BOLD}r2k-ip list${RESET}                 → Show active tunnels"
+echo -e "🔹 ${BOLD}r2k-ip remove 25565${RESET}         → Remove a tunnel"
+echo -e "🔹 ${BOLD}r2k-ip refresh${RESET}              → Restart all saved"
 echo -e "${WHITE}──────────────────────────────────────────────${RESET}"
 
-# Add self-run
-echo -e "\n${WHITE}🛠️  Making script executable and running it again...${RESET}"
-chmod +x script.sh
-./script.sh
+# Remove self-run to prevent infinite loop
+echo -e "\n${WHITE}🛠️  Script setup complete. Run 'r2k-ip help' for usage.${RESET}"
