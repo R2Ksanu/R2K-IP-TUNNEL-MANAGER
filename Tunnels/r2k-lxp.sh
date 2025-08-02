@@ -24,8 +24,10 @@ print_header() {
 validate_token() {
     local token=$1
     echo -e "${WHITE}🔍 Validating LocalXpose API token...${RESET}"
-    if ! "$LXP_BIN" account status --token "$token" > /dev/null 2>&1; then
-        echo -e "${WHITE}❌ Invalid or expired API token. Please check your token at https://localxpose.io/dashboard/access${RESET}"
+    local error_message=$("$LXP_BIN" account status --token "$token" 2>&1)
+    if [[ $? -ne 0 ]]; then
+        echo -e "${WHITE}❌ Token validation failed: $error_message${RESET}"
+        echo -e "${WHITE}Please check your token at https://localxpose.io/dashboard/access${RESET}"
         exit 1
     fi
     echo -e "${BLUE}✅ API token validated successfully${RESET}"
@@ -34,21 +36,40 @@ validate_token() {
 print_header
 echo -e "${WHITE}🔧 Installing LocalXpose CLI...${RESET}"
 
+# Check if LocalXpose CLI is installed, download if not
 if [[ ! -f "$LXP_BIN" ]]; then
-    curl -s https://api.localxpose.io/api/v2/downloads/lxp-linux-amd64 -o "$LXP_BIN"
+    echo -e "${WHITE}⬇️ Downloading LocalXpose CLI...${RESET}"
+    if ! curl -s https://api.localxpose.io/api/v2/downloads/lxp-linux-amd64 -o "$LXP_BIN"; then
+        echo -e "${WHITE}❌ Failed to download LocalXpose CLI. Check your internet connection or visit https://localxpose.io${RESET}"
+        exit 1
+    fi
     chmod +x "$LXP_BIN"
-    echo -e "${BLUE}✅ LocalXpose installed to $LXP_BIN${RESET}"
+    echo -e "${BLUE}✅ LocalXpose CLI installed to $LXP_BIN${RESET}"
 else
-    echo -e "${WHITE}✅ LocalXpose already installed.${RESET}"
+    echo -e "${WHITE}✅ LocalXpose CLI already installed at $LXP_BIN${RESET}"
 fi
 
+# Verify CLI is executable
+if [[ ! -x "$LXP_BIN" ]]; then
+    echo -e "${WHITE}❌ LocalXpose CLI is not executable. Attempting to fix...${RESET}"
+    chmod +x "$LXP_BIN" || { echo -e "${WHITE}❌ Failed to make $LXP_BIN executable${RESET}"; exit 1; }
+fi
+
+# Prompt for API token
 echo -ne "${WHITE}🔑 Enter your LocalXpose auth token: ${RESET}"
 read -r LXP_TOKEN
+if [[ -z "$LXP_TOKEN" ]]; then
+    echo -e "${WHITE}❌ No token provided. Please get your token from https://localxpose.io/dashboard/access${RESET}"
+    exit 1
+fi
+
+# Validate and set token
 validate_token "$LXP_TOKEN"
-"$LXP_BIN" authtoken "$LXP_TOKEN"
+"$LXP_BIN" authtoken "$LXP_TOKEN" || { echo -e "${WHITE}❌ Failed to set auth token${RESET}"; exit 1; }
 
 echo -e "\n${WHITE}📦 Creating r2k-ip tunnel manager...${RESET}"
 
+# Create r2k-ip command script
 sudo tee "$R2K_CMD" > /dev/null << 'EOF'
 #!/bin/bash
 
@@ -99,11 +120,11 @@ add_port() {
     local log_file="${LOG_DIR}/r2k_${type}_${port}.log"
     nohup "$LXP_BIN" tunnel "$type" --port "$port" --region "$region" > "$log_file" 2>&1 &
 
-    sleep 3
+    sleep 5
     url=$(grep -Eo 'https?://[^ ]+|tcp://[^ ]+|udp://[^ ]+' "$log_file" | head -n 1)
 
     if [[ -z "$url" ]]; then
-        echo -e "${WHITE}❌ Failed to start tunnel for port $port in region $region${RESET}"
+        echo -e "${WHITE}❌ Failed to start tunnel for port $port in region $region. Check $log_file for details${RESET}"
         exit 1
     fi
 
@@ -124,14 +145,14 @@ remove_port() {
     sed -i "/^${port}:/d" "$PORTS_FILE"
     rm -f "${LOG_DIR}/r2k_"*"_${port}.log"
 
-    echo -e "${BLUE}🗑️  Removed tunnel on port $port${RESET}"
+    echo -e "${BLUE}🗑️ Removed tunnel on port $port${RESET}"
 }
 
 list_ports() {
     print_header
 
     if [[ ! -f "$PORTS_FILE" || ! -s "$PORTS_FILE" ]]; then
-        echo -e "${WHITE}⚠️  No active tunnels.${RESET}"
+        echo -e "${WHITE}⚠️ No active tunnels.${RESET}"
         exit 0
     fi
 
@@ -157,7 +178,7 @@ refresh_ports() {
     echo -e "${WHITE}🔄 Restarting saved tunnels...${RESET}"
 
     if [[ ! -f "$PORTS_FILE" || ! -s "$PORTS_FILE" ]]; then
-        echo -e "${WHITE}⚠️  No tunnels saved.${RESET}"
+        echo -e "${WHITE}⚠️ No tunnels saved.${RESET}"
         exit 0
     fi
 
@@ -196,7 +217,7 @@ case "$1" in
 esac
 EOF
 
-chmod +x "$R2K_CMD"
+chmod +x "$R2K_CMD" || { echo -e "${WHITE}❌ Failed to make $R2K_CMD executable${RESET}"; exit 1; }
 
 echo -e "\n${WHITE}🔁 Creating systemd service...${RESET}"
 sudo tee /etc/systemd/system/r2k-ip-refresh.service > /dev/null <<EOF
@@ -214,7 +235,7 @@ EOF
 
 sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
-sudo systemctl enable r2k-ip-refresh
+sudo systemctl enable r2k-ip-refresh || { echo -e "${WHITE}❌ Failed to enable systemd service${RESET}"; exit 1; }
 
 echo -e "\n${BLUE}${BOLD}🎉 Setup Complete! Commands:${RESET}"
 echo -e "${WHITE}──────────────────────────────────────────────${RESET}"
@@ -224,6 +245,4 @@ echo -e "🔹 ${BOLD}r2k-ip list${RESET}                 → Show active tunnels
 echo -e "🔹 ${BOLD}r2k-ip remove 25565${RESET}         → Remove a tunnel"
 echo -e "🔹 ${BOLD}r2k-ip refresh${RESET}              → Restart all saved"
 echo -e "${WHITE}──────────────────────────────────────────────${RESET}"
-
-# Remove self-run to prevent infinite loop
-echo -e "\n${WHITE}🛠️  Script setup complete. Run 'r2k-ip help' for usage.${RESET}"
+echo -e "\n${WHITE}🛠️ Run 'r2k-ip help' for usage instructions.${RESET}"
