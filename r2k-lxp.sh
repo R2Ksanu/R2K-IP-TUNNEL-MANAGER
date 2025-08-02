@@ -1,39 +1,25 @@
 #!/bin/bash
 
-# r2k-lxp.sh - Installer for r2kip using LocalXpose (lxp)
-
-PORTS_FILE="/etc/lxp.ports"
-LXP_BIN="/usr/local/bin/lxp"
-R2K_CMD="/usr/local/bin/r2kip"
-LOG_DIR="/tmp/lxp_logs"
-
-echo "🚀 Installing LocalXpose CLI..."
-
-if [[ ! -f "$LXP_BIN" ]]; then
-    curl -s https://api.localxpose.io/api/v2/downloads/lxp-linux-amd64 -o "$LXP_BIN"
-    chmod +x "$LXP_BIN"
-else
-    echo "✅ LocalXpose already installed."
-fi
-
-read -p "🔑 Enter your LocalXpose auth token: " LXP_TOKEN
-"$LXP_BIN" authtoken "$LXP_TOKEN"
-
-echo "📦 Creating r2kip tunnel manager for LocalXpose..."
-
-sudo tee "$R2K_CMD" > /dev/null << 'EOF'
-#!/bin/bash
-
-PORTS_FILE="/etc/lxp.ports"
-LOG_DIR="/tmp/lxp_logs"
+PORTS_FILE="/etc/r2k.ports"
+LOG_DIR="/tmp/r2k_logs"
 LXP_BIN="/usr/local/bin/lxp"
 mkdir -p "$LOG_DIR"
+
+GREEN="\033[1;32m"
+RED="\033[1;31m"
+YELLOW="\033[1;33m"
+CYAN="\033[1;36m"
+BOLD="\033[1m"
+RESET="\033[0m"
 
 add_port() {
     local port=$1
     local type=$2
+
+    echo -e "${CYAN}🔌 Adding tunnel for local port: $port (${type})...${RESET}"
+
     if [[ -z "$port" ]]; then
-        echo "❌ Please provide a port."
+        echo -e "${RED}❌ Please provide a port.${RESET}"
         exit 1
     fi
 
@@ -41,55 +27,61 @@ add_port() {
         type="tcp"
     fi
 
-    local log_file="${LOG_DIR}/lxp_${type}_${port}.log"
+    local log_file="${LOG_DIR}/r2k_${type}_${port}.log"
     nohup "$LXP_BIN" tunnel "$type" --port "$port" > "$log_file" 2>&1 &
 
-    # Wait up to 5s for LocalXpose to start
     sleep 3
     url=$(grep -Eo 'https?://[^ ]+|tcp://[^ ]+' "$log_file" | head -n 1)
 
     if [[ -z "$url" ]]; then
-        echo "❌ Failed to start LocalXpose tunnel for port $port"
+        echo -e "${RED}❌ Failed to start tunnel for port $port${RESET}"
         exit 1
     fi
 
     echo "${port}:${type}:${url}" >> "$PORTS_FILE"
-    echo "✅ Local ${type} port ${port} exposed at: ${url}"
+    echo -e "${GREEN}✅ Local ${type^^} port ${port} exposed at: $url${RESET}"
 }
 
 remove_port() {
     local port=$1
+    echo -e "${YELLOW}⚙️  Removing tunnel on port $port...${RESET}"
+
     if [[ -z "$port" ]]; then
-        echo "❌ Provide a port to remove."
+        echo -e "${RED}❌ Provide a port to remove.${RESET}"
         exit 1
     fi
 
     pkill -f "lxp tunnel .* --port $port" >/dev/null 2>&1
     sed -i "/^${port}:/d" "$PORTS_FILE"
-    rm -f "${LOG_DIR}/lxp_"*"_${port}.log"
-    echo "✅ Removed tunnel for port ${port}"
+    rm -f "${LOG_DIR}/r2k_"*"_${port}.log"
+    echo -e "${GREEN}✅ Removed tunnel for port ${port}${RESET}"
 }
 
 list_ports() {
     if [[ ! -f "$PORTS_FILE" ]]; then
-        echo "⚠️ No active tunnels."
+        echo -e "${YELLOW}⚠️  No active tunnels.${RESET}"
         exit 0
     fi
-    echo "📋 Active LocalXpose Tunnels:"
+
+    echo -e "${BOLD}📋 Active r2k Tunnels:${RESET}"
+    printf "${CYAN}%-10s %-6s %-60s${RESET}\n" "Port" "Type" "Public URL"
+    echo -e "${CYAN}----------------------------------------------------------------------${RESET}"
     while IFS= read -r line; do
         local_port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
         url=$(echo "$line" | cut -d':' -f3-)
-        echo "🔹 $type port $local_port → $url"
+        printf "🔹 %-8s %-6s %-60s\n" "$local_port" "$type" "$url"
     done < "$PORTS_FILE"
 }
 
 refresh_ports() {
-    echo "🔄 Restarting tunnels..."
+    echo -e "${CYAN}🔄 Restarting saved tunnels...${RESET}"
+
     if [[ ! -f "$PORTS_FILE" ]]; then
-        echo "⚠️ No tunnels saved."
+        echo -e "${YELLOW}⚠️  No tunnels saved.${RESET}"
         exit 0
     fi
+
     local ports=$(cat "$PORTS_FILE")
     > "$PORTS_FILE"
 
@@ -98,6 +90,19 @@ refresh_ports() {
         type=$(echo "$line" | cut -d':' -f2)
         add_port "$local_port" "$type"
     done <<< "$ports"
+
+    echo -e "${GREEN}✅ All tunnels restarted.${RESET}"
+}
+
+show_help() {
+    echo -e "${BOLD}Usage:${RESET} r2k-ip {add|remove|list|refresh} [port] [type]"
+    echo ""
+    echo -e "${CYAN}Commands:${RESET}"
+    echo -e "  ${GREEN}add <port> [tcp|http]${RESET}      → expose a new tunnel"
+    echo -e "  ${YELLOW}remove <port>${RESET}               → stop and remove a tunnel"
+    echo -e "  ${CYAN}list${RESET}                        → list active tunnels"
+    echo -e "  ${CYAN}refresh${RESET}                     → restart all saved tunnels"
+    echo ""
 }
 
 case "$1" in
@@ -114,38 +119,7 @@ case "$1" in
         refresh_ports
         ;;
     *)
-        echo "Usage: r2kip {add|remove|list|refresh} [port] [type:tcp|http]"
+        show_help
         exit 1
         ;;
 esac
-EOF
-
-sudo chmod +x "$R2K_CMD"
-
-echo "🛠 Setting up systemd auto-start..."
-
-sudo tee /etc/systemd/system/r2kip-refresh.service > /dev/null <<EOF
-[Unit]
-Description=Refresh LocalXpose tunnels after boot
-After=network.target
-
-[Service]
-ExecStart=$R2K_CMD refresh
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reexec
-sudo systemctl daemon-reload
-sudo systemctl enable r2kip-refresh
-
-echo ""
-echo "✅ Setup complete! Commands:"
-echo "  r2kip add 3000 http     → expose HTTP port"
-echo "  r2kip add 25565 tcp     → expose Minecraft server"
-echo "  r2kip list              → show active tunnels"
-echo "  r2kip remove 25565      → stop tunnel"
-echo "  r2kip refresh           → restart saved tunnels"
-echo ""
