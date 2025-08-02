@@ -1,18 +1,56 @@
 #!/bin/bash
 
 PORTS_FILE="/etc/r2k.ports"
-LOG_DIR="/tmp/r2k_logs"
 LXP_BIN="/usr/local/bin/lxp"
-mkdir -p "$LOG_DIR"
+R2K_CMD="/usr/local/bin/r2k-ip"
+LOG_DIR="/tmp/r2k_logs"
 
-# Color palette
 BLUE="\033[38;5;39m"
 WHITE="\033[97m"
 GRAY="\033[90m"
 BOLD="\033[1m"
 RESET="\033[0m"
 
-# ASCII Logo
+print_header() {
+    clear
+    echo -e "${BLUE}${BOLD}"
+    echo "╔════════════════════════════════════════════════════════╗"
+    echo "║   🚀 R2K-IP: Beautiful Tunnel Manager via LocalXpose  ║"
+    echo "╚════════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+}
+
+print_header
+echo -e "${WHITE}🔧 Installing LocalXpose CLI...${RESET}"
+
+if [[ ! -f "$LXP_BIN" ]]; then
+    curl -s https://api.localxpose.io/api/v2/downloads/lxp-linux-amd64 -o "$LXP_BIN"
+    chmod +x "$LXP_BIN"
+    echo -e "${BLUE}✅ LocalXpose installed to $LXP_BIN${RESET}"
+else
+    echo -e "${WHITE}✅ LocalXpose already installed.${RESET}"
+fi
+
+echo -ne "${WHITE}🔑 Enter your LocalXpose auth token: ${RESET}"
+read -r LXP_TOKEN
+"$LXP_BIN" authtoken "$LXP_TOKEN"
+
+echo -e "\n${WHITE}📦 Creating r2k-ip tunnel manager...${RESET}"
+
+sudo tee "$R2K_CMD" > /dev/null << 'EOF'
+#!/bin/bash
+
+PORTS_FILE="/etc/r2k.ports"
+LOG_DIR="/tmp/r2k_logs"
+LXP_BIN="/usr/local/bin/lxp"
+mkdir -p "$LOG_DIR"
+
+BLUE="\033[38;5;39m"
+WHITE="\033[97m"
+GRAY="\033[90m"
+BOLD="\033[1m"
+RESET="\033[0m"
+
 print_header() {
     clear
     echo -e "${BLUE}${BOLD}"
@@ -127,20 +165,44 @@ show_help() {
 }
 
 case "$1" in
-    add)
-        add_port "$2" "$3"
-        ;;
-    remove)
-        remove_port "$2"
-        ;;
-    list)
-        list_ports
-        ;;
-    refresh)
-        refresh_ports
-        ;;
-    *)
-        show_help
-        exit 1
-        ;;
+    add) add_port "$2" "$3" ;;
+    remove) remove_port "$2" ;;
+    list) list_ports ;;
+    refresh) refresh_ports ;;
+    *) show_help; exit 1 ;;
 esac
+EOF
+
+chmod +x "$R2K_CMD"
+
+echo -e "\n${WHITE}🔁 Creating systemd service...${RESET}"
+sudo tee /etc/systemd/system/r2k-ip-refresh.service > /dev/null <<EOF
+[Unit]
+Description=Refresh r2k-ip tunnels after boot
+After=network.target
+
+[Service]
+ExecStart=$R2K_CMD refresh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl enable r2k-ip-refresh
+
+echo -e "\n${BLUE}${BOLD}🎉 Setup Complete! Commands:${RESET}"
+echo -e "${WHITE}──────────────────────────────────────────────${RESET}"
+echo -e "🔹 ${BOLD}r2k-ip add 3000 http${RESET}     → Expose HTTP port"
+echo -e "🔹 ${BOLD}r2k-ip add 25565 tcp${RESET}     → Expose Minecraft port"
+echo -e "🔹 ${BOLD}r2k-ip list${RESET}              → Show active tunnels"
+echo -e "🔹 ${BOLD}r2k-ip remove 25565${RESET}      → Remove a tunnel"
+echo -e "🔹 ${BOLD}r2k-ip refresh${RESET}           → Restart all saved"
+echo -e "${WHITE}──────────────────────────────────────────────${RESET}"
+
+# Add self-run
+echo -e "\n${WHITE}🛠️  Making script executable and running it again...${RESET}"
+chmod +x script.sh
+./script.sh
