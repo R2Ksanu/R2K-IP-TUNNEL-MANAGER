@@ -5,21 +5,31 @@ LOG_DIR="/tmp/r2k_logs"
 LXP_BIN="/usr/local/bin/lxp"
 mkdir -p "$LOG_DIR"
 
-GREEN="\033[1;32m"
-RED="\033[1;31m"
-YELLOW="\033[1;33m"
-CYAN="\033[1;36m"
+# Color palette
+BLUE="\033[38;5;39m"
+WHITE="\033[97m"
+GRAY="\033[90m"
 BOLD="\033[1m"
 RESET="\033[0m"
+
+# ASCII Logo
+print_header() {
+    clear
+    echo -e "${BLUE}${BOLD}"
+    echo "╔════════════════════════════════════════════╗"
+    echo "║    🌐  R2K-IP TUNNEL MANAGER by R2K.DEV    ║"
+    echo "╚════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+}
 
 add_port() {
     local port=$1
     local type=$2
 
-    echo -e "${CYAN}🔌 Adding tunnel for local port: $port (${type})...${RESET}"
+    print_header
 
     if [[ -z "$port" ]]; then
-        echo -e "${RED}❌ Please provide a port.${RESET}"
+        echo -e "${WHITE}❌ Please provide a port.${RESET}"
         exit 1
     fi
 
@@ -27,6 +37,7 @@ add_port() {
         type="tcp"
     fi
 
+    echo -e "${WHITE}🔌 Creating ${type^^} tunnel on port ${port}...${RESET}"
     local log_file="${LOG_DIR}/r2k_${type}_${port}.log"
     nohup "$LXP_BIN" tunnel "$type" --port "$port" > "$log_file" 2>&1 &
 
@@ -34,51 +45,60 @@ add_port() {
     url=$(grep -Eo 'https?://[^ ]+|tcp://[^ ]+' "$log_file" | head -n 1)
 
     if [[ -z "$url" ]]; then
-        echo -e "${RED}❌ Failed to start tunnel for port $port${RESET}"
+        echo -e "${WHITE}❌ Failed to start tunnel for port $port${RESET}"
         exit 1
     fi
 
     echo "${port}:${type}:${url}" >> "$PORTS_FILE"
-    echo -e "${GREEN}✅ Local ${type^^} port ${port} exposed at: $url${RESET}"
+    echo -e "${BLUE}✅ ${type^^} tunnel exposed: $url${RESET}"
 }
 
 remove_port() {
     local port=$1
-    echo -e "${YELLOW}⚙️  Removing tunnel on port $port...${RESET}"
+    print_header
 
     if [[ -z "$port" ]]; then
-        echo -e "${RED}❌ Provide a port to remove.${RESET}"
+        echo -e "${WHITE}❌ Provide a port to remove.${RESET}"
         exit 1
     fi
 
     pkill -f "lxp tunnel .* --port $port" >/dev/null 2>&1
     sed -i "/^${port}:/d" "$PORTS_FILE"
     rm -f "${LOG_DIR}/r2k_"*"_${port}.log"
-    echo -e "${GREEN}✅ Removed tunnel for port ${port}${RESET}"
+
+    echo -e "${BLUE}🗑️  Removed tunnel on port $port${RESET}"
 }
 
 list_ports() {
-    if [[ ! -f "$PORTS_FILE" ]]; then
-        echo -e "${YELLOW}⚠️  No active tunnels.${RESET}"
+    print_header
+
+    if [[ ! -f "$PORTS_FILE" || ! -s "$PORTS_FILE" ]]; then
+        echo -e "${WHITE}⚠️  No active tunnels.${RESET}"
         exit 0
     fi
 
-    echo -e "${BOLD}📋 Active r2k Tunnels:${RESET}"
-    printf "${CYAN}%-10s %-6s %-60s${RESET}\n" "Port" "Type" "Public URL"
-    echo -e "${CYAN}----------------------------------------------------------------------${RESET}"
+    echo -e "${WHITE}${BOLD}📦 Active Tunnels${RESET}"
+    echo -e "${GRAY}───────────────────────────────────────────────────────────────${RESET}"
+    printf "${BLUE}🔹 %-6s │ %-5s │ %-40s${RESET}\n" "Port" "Type" "Public URL"
+    echo -e "${GRAY}───────────────────────────────────────────────────────────────${RESET}"
+
     while IFS= read -r line; do
-        local_port=$(echo "$line" | cut -d':' -f1)
+        port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
         url=$(echo "$line" | cut -d':' -f3-)
-        printf "🔹 %-8s %-6s %-60s\n" "$local_port" "$type" "$url"
+        printf "🔹 %-6s │ %-5s │ %-40s\n" "$port" "$type" "$url"
     done < "$PORTS_FILE"
+
+    echo -e "${GRAY}───────────────────────────────────────────────────────────────${RESET}"
 }
 
 refresh_ports() {
-    echo -e "${CYAN}🔄 Restarting saved tunnels...${RESET}"
+    print_header
 
-    if [[ ! -f "$PORTS_FILE" ]]; then
-        echo -e "${YELLOW}⚠️  No tunnels saved.${RESET}"
+    echo -e "${WHITE}🔄 Restarting saved tunnels...${RESET}"
+
+    if [[ ! -f "$PORTS_FILE" || ! -s "$PORTS_FILE" ]]; then
+        echo -e "${WHITE}⚠️  No tunnels saved.${RESET}"
         exit 0
     fi
 
@@ -86,22 +106,23 @@ refresh_ports() {
     > "$PORTS_FILE"
 
     while IFS= read -r line; do
-        local_port=$(echo "$line" | cut -d':' -f1)
+        port=$(echo "$line" | cut -d':' -f1)
         type=$(echo "$line" | cut -d':' -f2)
-        add_port "$local_port" "$type"
+        add_port "$port" "$type"
     done <<< "$ports"
 
-    echo -e "${GREEN}✅ All tunnels restarted.${RESET}"
+    echo -e "${BLUE}✅ All tunnels restarted.${RESET}"
 }
 
 show_help() {
-    echo -e "${BOLD}Usage:${RESET} r2k-ip {add|remove|list|refresh} [port] [type]"
+    print_header
+    echo -e "${WHITE}${BOLD}Usage:${RESET} r2k-ip {add|remove|list|refresh} [port] [type]"
     echo ""
-    echo -e "${CYAN}Commands:${RESET}"
-    echo -e "  ${GREEN}add <port> [tcp|http]${RESET}      → expose a new tunnel"
-    echo -e "  ${YELLOW}remove <port>${RESET}               → stop and remove a tunnel"
-    echo -e "  ${CYAN}list${RESET}                        → list active tunnels"
-    echo -e "  ${CYAN}refresh${RESET}                     → restart all saved tunnels"
+    echo -e "${BLUE}Commands:${RESET}"
+    echo -e "  🔹 ${BOLD}add <port> [tcp|http]${RESET}     ${WHITE}Expose new tunnel${RESET}"
+    echo -e "  🔹 ${BOLD}remove <port>${RESET}             ${WHITE}Stop tunnel on given port${RESET}"
+    echo -e "  🔹 ${BOLD}list${RESET}                      ${WHITE}Show all active tunnels${RESET}"
+    echo -e "  🔹 ${BOLD}refresh${RESET}                   ${WHITE}Restart all saved tunnels${RESET}"
     echo ""
 }
 
